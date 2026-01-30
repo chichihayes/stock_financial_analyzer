@@ -201,7 +201,7 @@ def generate_financial_analysis_openrouter(ticker_symbol, ratios):
         }
 
         data = {
-            "model": "deepseek/deepseek-r1:free",
+            "model": "google/gemini-2.5-flash-lite",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7
         }
