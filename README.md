@@ -1,5 +1,5 @@
 # stock_financial_analyzer
-# Orbann_ai - Financial Analysis Dashboard
+
 
 A comprehensive tool for financial statement analysis that provides detailed insights into company financial health through automated ratio calculations and intelligent analysis.
 
