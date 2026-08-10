@@ -1,9 +1,12 @@
 """
-Vercel Python serverless function: GET /api/analyze?ticker=AAPL&useAi=true
+Vercel Python serverless function: GET /api/analyze?ticker=AAPL
 
 Fetches balance sheet / income statement / cash flow data for a ticker,
-computes financial ratios, and (optionally) generates a written analysis.
-Returns everything as JSON for the Next.js frontend to render.
+computes financial ratios, and generates an AI analysis via OpenRouter.
+
+There is no rule-based fallback. If the AI call fails for any reason, the
+response comes back with analysis: null and an explicit aiError message —
+never generated text that could be mistaken for a real AI response.
 """
 import json
 import os
@@ -15,12 +18,12 @@ from urllib.parse import urlparse, parse_qs
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from lib.finance_core import (  # noqa: E402
+    AIAnalysisError,
     clean_balance_sheet,
     clean_income_statement,
     clean_cash_flow_statement,
     calculate_financial_ratios,
     generate_financial_analysis_openrouter,
-    generate_rule_based_analysis,
     to_jsonable,
 )
 
@@ -45,7 +48,6 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         query = parse_qs(urlparse(self.path).query)
         ticker_symbol = (query.get("ticker", [""])[0] or "").strip().upper()
-        use_ai = (query.get("useAi", ["true"])[0] or "true").lower() == "true"
 
         if not ticker_symbol:
             self._send_json(400, {"error": "Missing required 'ticker' query parameter."})
@@ -56,23 +58,30 @@ class handler(BaseHTTPRequestHandler):
             income_statement = clean_income_statement(ticker_symbol)
             cash_flow = clean_cash_flow_statement(ticker_symbol)
             ratios = calculate_financial_ratios(balance_sheet, income_statement, cash_flow)
-
-            log = []
-            if use_ai:
-                analysis, log, used_ai = generate_financial_analysis_openrouter(ticker_symbol, ratios)
-            else:
-                analysis = generate_rule_based_analysis(ratios)
-                used_ai = False
-
-            self._send_json(200, {
-                "ticker": ticker_symbol,
-                "ratios": to_jsonable(ratios),
-                "analysis": analysis,
-                "usedAi": used_ai,
-                "log": log,
-            })
         except Exception as e:
             self._send_json(500, {
                 "error": f"Error occurred: {str(e)}",
                 "detail": traceback.format_exc(),
             })
+            return
+
+        # No fallback: analysis is either a genuine OpenRouter response or
+        # None with aiError explaining why it couldn't be generated.
+        try:
+            analysis, log = generate_financial_analysis_openrouter(ticker_symbol, ratios)
+            used_ai = True
+            ai_error = None
+        except AIAnalysisError as e:
+            analysis = None
+            used_ai = False
+            ai_error = str(e)
+            log = e.log
+
+        self._send_json(200, {
+            "ticker": ticker_symbol,
+            "ratios": to_jsonable(ratios),
+            "analysis": analysis,
+            "usedAi": used_ai,
+            "aiError": ai_error,
+            "log": log,
+        })

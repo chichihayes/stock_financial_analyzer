@@ -2,9 +2,14 @@
 
 A tool for financial statement analysis: fetches a company's balance sheet,
 income statement, and cash flow from Yahoo Finance, computes the key
-liquidity/solvency/profitability ratios, generates a written analysis
-(AI-assisted via OpenRouter, or rule-based as a fallback), and exports
-everything as a Word document.
+liquidity/solvency/profitability ratios, generates an AI-written analysis
+via OpenRouter, and exports everything as a Word document.
+
+**There is no rule-based fallback.** If the OpenRouter call fails for any
+reason (missing/invalid `OPENROUTER_API_KEY`, API error, network error),
+`/api/analyze` returns `analysis: null` with an explicit `aiError` message
+instead of generated text — so a failure can never be mistaken for a real
+AI response.
 
 This started as a **Streamlit** app and has been rebuilt as a **Next.js +
 Vercel Python Serverless Functions** app so it can be deployed on Vercel.
@@ -60,9 +65,8 @@ You need Node.js 18+ and Python 3.9+.
    npm install -g vercel
    vercel dev
    ```
-3. Copy `.env.example` to `.env.local` and add your OpenRouter key if you
-   want AI-generated analysis (optional — without it the app falls back to
-   rule-based analysis):
+3. Copy `.env.example` to `.env.local` and add your OpenRouter key —
+   required, since there's no fallback without it:
    ```bash
    cp .env.example .env.local
    ```
@@ -76,8 +80,9 @@ You need Node.js 18+ and Python 3.9+.
    Vercel auto-detects the Next.js frontend and the Python functions in
    `api/` — no extra configuration needed.
 3. In **Project Settings → Environment Variables**, add:
-   - `OPENROUTER_API_KEY` — your OpenRouter API key (optional; omit to use
-     rule-based analysis only).
+   - `OPENROUTER_API_KEY` — your OpenRouter API key. Required — without it,
+     every analysis request returns an explicit `aiError` instead of any
+     generated text.
 4. Deploy. That's it — no `vercel.json` needed, Vercel picks up the
    Python runtime for `api/*.py` automatically from `requirements.txt`.
 

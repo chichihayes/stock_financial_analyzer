@@ -210,11 +210,26 @@ def from_jsonable(ratios: dict) -> dict:
 # Analysis generation
 # ---------------------------------------------------------------------------
 
+class AIAnalysisError(RuntimeError):
+    """Raised whenever the OpenRouter call can't produce a real AI analysis.
+
+    Carries the diagnostic log lines collected up to the point of failure.
+    There is deliberately NO automatic fallback to the rule-based analysis
+    here — callers must decide explicitly what to show, so an AI failure
+    can never be mistaken for a genuine AI response.
+    """
+
+    def __init__(self, message, log=None):
+        super().__init__(message)
+        self.log = log or []
+
+
 def generate_financial_analysis_openrouter(ticker_symbol, ratios):
     """Generate financial analysis using OpenRouter.
 
-    Returns (analysis, log_lines, used_ai) — used_ai is False whenever the
-    rule-based fallback was used instead (missing key, API error, exception).
+    Returns (analysis, log_lines) on success. Raises AIAnalysisError on any
+    failure (missing key, HTTP error, network error, unexpected response
+    shape) — no silent fallback.
     """
 
     API_URL = "https://openrouter.ai/api/v1"
@@ -241,90 +256,49 @@ def generate_financial_analysis_openrouter(ticker_symbol, ratios):
 
     start_time = time.time()
 
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        log.append("No OPENROUTER_API_KEY configured.")
+        raise AIAnalysisError("No OPENROUTER_API_KEY configured.", log)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    data = {
+        "model": "google/gemini-2.5-flash-lite",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+    }
+
+    log.append("Sending request to OpenRouter API...")
     try:
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        if not api_key:
-            log.append("No OpenRouter API key provided. Falling back to rule-based analysis.")
-            return generate_rule_based_analysis(ratios), log, False
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-        data = {
-            "model": "google/gemini-2.5-flash-lite",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7,
-        }
-
-        log.append("Sending request to OpenRouter API...")
         response = requests.post(API_URL + "/chat/completions", json=data, headers=headers, timeout=30)
-        log.append(f"API Status Code: {response.status_code}")
-
-        if response.status_code == 200:
-            analysis = response.json()["choices"][0]["message"]["content"].strip()
-            end_time = time.time()
-            log.append(f"Analysis generated in {end_time - start_time:.2f} seconds")
-            return analysis, log, True
-        else:
-            log.append(f"API Response Error: {response.status_code}")
-            log.append(f"Response Details: {response.text[:100]}...")
-            return generate_rule_based_analysis(ratios), log, False
-
     except Exception as e:
         log.append(f"Error connecting to OpenRouter API: {str(e)}")
-        return generate_rule_based_analysis(ratios), log, False
+        raise AIAnalysisError(f"Error connecting to OpenRouter API: {str(e)}", log) from e
+
+    log.append(f"API Status Code: {response.status_code}")
+
+    if response.status_code != 200:
+        log.append(f"Response Details: {response.text[:200]}")
+        raise AIAnalysisError(f"OpenRouter API returned status {response.status_code}", log)
+
+    try:
+        analysis = response.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        log.append(f"Unexpected OpenRouter response shape: {str(e)}")
+        raise AIAnalysisError(f"Unexpected OpenRouter response shape: {str(e)}", log) from e
+
+    end_time = time.time()
+    log.append(f"Analysis generated in {end_time - start_time:.2f} seconds")
+    return analysis, log
 
 
-def generate_rule_based_analysis(ratios):
-    """Generate a basic analysis based on rules when API is unavailable."""
-    analysis = "Financial Analysis:\n\n"
-
-    current_ratio = ratios.get("Current Ratio")
-    if current_ratio:
-        if current_ratio > 2:
-            analysis += "• Liquidity is strong with a current ratio of {:.2f}x, suggesting the company can easily meet short-term obligations.\n".format(current_ratio)
-        elif current_ratio > 1:
-            analysis += "• Liquidity is adequate with a current ratio of {:.2f}x, sufficient to cover short-term liabilities.\n".format(current_ratio)
-        else:
-            analysis += "• Liquidity is concerning with a current ratio of {:.2f}x, indicating potential challenges meeting short-term obligations.\n".format(current_ratio)
-
-    debt_equity = ratios.get("Debt-to-Equity Ratio")
-    if debt_equity:
-        if debt_equity > 2:
-            analysis += "• The debt-to-equity ratio of {:.2f}x is high, suggesting significant leverage and financial risk.\n".format(debt_equity)
-        elif debt_equity > 1:
-            analysis += "• The debt-to-equity ratio of {:.2f}x indicates moderate leverage, with debt exceeding equity.\n".format(debt_equity)
-        else:
-            analysis += "• The debt-to-equity ratio of {:.2f}x is conservative, indicating lower financial risk.\n".format(debt_equity)
-
-    roe = ratios.get("Return on Equity (ROE)")
-    if roe:
-        if roe > 0.15:
-            analysis += "• Return on Equity (ROE) of {:.1f}% is excellent, indicating efficient use of shareholder capital.\n".format(roe * 100)
-        elif roe > 0.08:
-            analysis += "• Return on Equity (ROE) of {:.1f}% is solid, showing reasonable returns on shareholder investments.\n".format(roe * 100)
-        else:
-            analysis += "• Return on Equity (ROE) of {:.1f}% could be improved to enhance shareholder returns.\n".format(roe * 100)
-
-    net_margin = ratios.get("Net Margin")
-    if net_margin:
-        if net_margin > 0.15:
-            analysis += "• Net profit margin of {:.1f}% is strong, demonstrating effective cost management and pricing power.\n".format(net_margin * 100)
-        elif net_margin > 0.05:
-            analysis += "• Net profit margin of {:.1f}% is acceptable but could be improved through cost optimization.\n".format(net_margin * 100)
-        else:
-            analysis += "• Net profit margin of {:.1f}% is low, suggesting the need for revenue growth or cost reduction strategies.\n".format(net_margin * 100)
-
-    analysis += "\nRecommendations:\n"
-    analysis += "• Review the complete financial statements for a more comprehensive understanding of the company's position.\n"
-    analysis += "• Compare these metrics with industry peers to gain competitive context.\n"
-    analysis += "• Monitor trends over time to identify improvement or deterioration in financial health.\n"
-    analysis += "• Consider the company's growth stage and industry norms when evaluating these metrics.\n"
-    analysis += "• Consult with a financial advisor for personalized investment advice based on this analysis.\n"
-
-    return analysis
+# NOTE: there is intentionally no rule-based analysis generator in this
+# module. Analysis is either a genuine OpenRouter response or nothing at
+# all (AIAnalysisError) — no generated text ever stands in for the AI.
 
 
 # ---------------------------------------------------------------------------
