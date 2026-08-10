@@ -6,9 +6,8 @@ liquidity/solvency/profitability ratios, generates a written analysis
 (AI-assisted via OpenRouter, or rule-based as a fallback), and exports
 everything as a Word document.
 
-This started as a **Streamlit** app (still kept in [`legacy/finance_app.py`](legacy/finance_app.py)
-for reference) and has been rebuilt as a **Next.js + Vercel Python
-Serverless Functions** app so it can be deployed on Vercel.
+This started as a **Streamlit** app and has been rebuilt as a **Next.js +
+Vercel Python Serverless Functions** app so it can be deployed on Vercel.
 
 ## Why not just deploy the Streamlit app to Vercel?
 
@@ -43,11 +42,8 @@ financial-analysis/
 ├── api/
 │   ├── analyze.py        # Vercel Python function: fetch + compute + analyze
 │   └── report.py         # Vercel Python function: build the .docx report
-├── legacy/
-│   └── finance_app.py    # Original Streamlit app, kept for reference
 ├── requirements.txt      # Python deps for the /api functions
-├── package.json          # Node deps for the Next.js frontend
-└── vercel.json
+└── package.json          # Node deps for the Next.js frontend
 ```
 
 ## Local development
@@ -82,8 +78,8 @@ You need Node.js 18+ and Python 3.9+.
 3. In **Project Settings → Environment Variables**, add:
    - `OPENROUTER_API_KEY` — your OpenRouter API key (optional; omit to use
      rule-based analysis only).
-4. Deploy. That's it — `vercel.json` pins the Python runtime version so
-   builds are reproducible.
+4. Deploy. That's it — no `vercel.json` needed, Vercel picks up the
+   Python runtime for `api/*.py` automatically from `requirements.txt`.
 
 Or from the CLI, inside this folder:
 ```bash
