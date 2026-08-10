@@ -59,14 +59,16 @@ class handler(BaseHTTPRequestHandler):
 
             log = []
             if use_ai:
-                analysis, log = generate_financial_analysis_openrouter(ticker_symbol, ratios)
+                analysis, log, used_ai = generate_financial_analysis_openrouter(ticker_symbol, ratios)
             else:
                 analysis = generate_rule_based_analysis(ratios)
+                used_ai = False
 
             self._send_json(200, {
                 "ticker": ticker_symbol,
                 "ratios": to_jsonable(ratios),
                 "analysis": analysis,
+                "usedAi": used_ai,
                 "log": log,
             })
         except Exception as e:

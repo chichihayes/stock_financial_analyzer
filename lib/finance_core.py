@@ -53,16 +53,27 @@ def format_percentage(value):
 # Data retrieval
 # ---------------------------------------------------------------------------
 
+def _latest_statement_date(statement: pd.DataFrame) -> str:
+    """Pull the most recent period's reporting date out of a raw yahooquery
+    statement DataFrame, before non-numeric columns get dropped."""
+    if "asOfDate" in statement.columns:
+        return pd.to_datetime(statement["asOfDate"].iloc[-1]).strftime("%Y-%m-%d")
+    if isinstance(statement.index, pd.MultiIndex):
+        return str(statement.index.get_level_values(-1)[-1])
+    return str(statement.index[-1])
+
+
 def clean_income_statement(ticker_symbol: str) -> pd.DataFrame:
     """Fetch and clean income statement data."""
     ticker = Ticker(ticker_symbol)
     income_statement = ticker.income_statement(frequency="a")
+    latest_date = _latest_statement_date(income_statement)
 
     numeric_columns = income_statement.select_dtypes(include=["float64", "int64"]).columns
     income_statement_cleaned = income_statement[numeric_columns]
 
     income_statement_latest = income_statement_cleaned.iloc[-1:].T.reset_index()
-    income_statement_latest.columns = ["parameters", "value"]
+    income_statement_latest.columns = ["parameters", latest_date]
 
     return income_statement_latest
 
@@ -71,12 +82,13 @@ def clean_balance_sheet(ticker_symbol: str) -> pd.DataFrame:
     """Fetch and clean balance sheet data."""
     ticker = Ticker(ticker_symbol)
     balance_sheet = ticker.balance_sheet(frequency="a")
+    latest_date = _latest_statement_date(balance_sheet)
 
     numeric_columns = balance_sheet.select_dtypes(include=["float64", "int64"]).columns
     balance_sheet_cleaned = balance_sheet[numeric_columns]
 
     balance_sheet_latest = balance_sheet_cleaned.iloc[-1:].T.reset_index()
-    balance_sheet_latest.columns = ["parameters", "value"]
+    balance_sheet_latest.columns = ["parameters", latest_date]
 
     return balance_sheet_latest
 
@@ -89,7 +101,7 @@ def clean_cash_flow_statement(ticker_symbol: str) -> pd.DataFrame:
     cash_flow_cleaned = cash_flow.drop(index=["symbol", "periodType", "currencyCode"], errors="ignore")
 
     cash_flow_cleaned.loc["asOfDate"] = cash_flow_cleaned.loc["asOfDate"].astype(str).str.replace("_", "-")
-    new_column_names = pd.to_datetime(cash_flow_cleaned.loc["asOfDate"]).dt.strftime("%Y_%m_%d")
+    new_column_names = pd.to_datetime(cash_flow_cleaned.loc["asOfDate"]).dt.strftime("%Y-%m-%d")
     cash_flow_cleaned.columns = new_column_names
 
     cash_flow_cleaned = cash_flow_cleaned.drop(index="asOfDate")
@@ -199,7 +211,11 @@ def from_jsonable(ratios: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def generate_financial_analysis_openrouter(ticker_symbol, ratios):
-    """Generate financial analysis using OpenRouter. Returns (analysis, log_lines)."""
+    """Generate financial analysis using OpenRouter.
+
+    Returns (analysis, log_lines, used_ai) — used_ai is False whenever the
+    rule-based fallback was used instead (missing key, API error, exception).
+    """
 
     API_URL = "https://openrouter.ai/api/v1"
     log = []
@@ -229,7 +245,7 @@ def generate_financial_analysis_openrouter(ticker_symbol, ratios):
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             log.append("No OpenRouter API key provided. Falling back to rule-based analysis.")
-            return generate_rule_based_analysis(ratios), log
+            return generate_rule_based_analysis(ratios), log, False
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -250,15 +266,15 @@ def generate_financial_analysis_openrouter(ticker_symbol, ratios):
             analysis = response.json()["choices"][0]["message"]["content"].strip()
             end_time = time.time()
             log.append(f"Analysis generated in {end_time - start_time:.2f} seconds")
-            return analysis, log
+            return analysis, log, True
         else:
             log.append(f"API Response Error: {response.status_code}")
             log.append(f"Response Details: {response.text[:100]}...")
-            return generate_rule_based_analysis(ratios), log
+            return generate_rule_based_analysis(ratios), log, False
 
     except Exception as e:
         log.append(f"Error connecting to OpenRouter API: {str(e)}")
-        return generate_rule_based_analysis(ratios), log
+        return generate_rule_based_analysis(ratios), log, False
 
 
 def generate_rule_based_analysis(ratios):
