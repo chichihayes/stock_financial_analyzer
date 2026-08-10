@@ -1,5 +1,7 @@
 # Financial Analysis Dashboard (Orbann_ai)
 
+**Live app:** [stock-financial-analyzer.vercel.app](https://stock-financial-analyzer.vercel.app)
+
 A tool for financial statement analysis: fetches a company's balance sheet,
 income statement, and cash flow from Yahoo Finance, computes the key
 liquidity/solvency/profitability ratios, generates an AI-written analysis
